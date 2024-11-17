@@ -1,7 +1,8 @@
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { useEffect, useRef } from 'react';
-import { webSocketService, type VehicleData } from './WebSocketService';
+import { useEffect, useRef, useState } from 'react';
+import { webSocketService, type VehicleData, type VehicleDataPoint } from './WebSocketService';
+import styles from './mapbox.module.scss';
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_API;
 
@@ -20,19 +21,7 @@ const VEHICLE_PLATES = [
 
 const DUBAI_CENTER: [number, number] = [55.296249, 25.276987];
 
-interface StartPositions {
-  [key: string]: [number, number];
-}
-
-interface QueuedUpdate {
-  plate: string;
-  lng: number;
-  lat: number;
-  status: string;
-  angle: number;
-}
-
-function createMarkerElement(status: string, angle: number, isStartPosition: boolean = false): HTMLDivElement {
+function createMarkerElement(status: string, angle: number, data: VehicleDataPoint, plate: string): HTMLDivElement {
   const el = document.createElement('div');
   el.className = 'vehicle-marker';
   el.style.width = '40px';
@@ -48,11 +37,11 @@ function createMarkerElement(status: string, angle: number, isStartPosition: boo
   circle.style.width = '100%';
   circle.style.height = '100%';
   circle.style.borderRadius = '50%';
-  circle.style.backgroundColor = isStartPosition ?
-    'rgba(50, 205, 50, 0.9)' :
-    (status === 'moving' ? 'rgba(65, 105, 225, 0.9)' : 'rgba(128, 128, 128, 0.9)');
+  circle.style.backgroundColor = status === 'moving' ?
+    'rgba(65, 105, 225, 0.9)' :
+    'rgba(128, 128, 128, 0.9)';
   circle.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.2)';
-
+  circle.style.transition = 'transform 0.2s ease';
 
   const iconContainer = document.createElement('div');
   iconContainer.style.width = '24px';
@@ -64,25 +53,26 @@ function createMarkerElement(status: string, angle: number, isStartPosition: boo
   iconContainer.style.filter = 'brightness(0) invert(1)';
   iconContainer.style.zIndex = '1';
 
-  if (isStartPosition) {
-    iconContainer.style.backgroundImage = 'url(/begin-start.svg)';
+  if (status === 'moving') {
+    iconContainer.style.backgroundImage = 'url(/arrow-icon.svg)';
+    iconContainer.style.transform = `rotate(${angle}deg)`;
   } else {
-    switch (status) {
-      case 'moving':
-        iconContainer.style.backgroundImage = 'url(/arrow-icon.svg)';
-        iconContainer.style.transform = `rotate(${angle}deg)`;
-        break;
-      default:
-        iconContainer.style.backgroundImage = 'url(/default-icon.svg)';
-    }
+    iconContainer.style.backgroundImage = 'url(/default-icon.svg)';
   }
 
-  el.onmouseenter = () => {
-    circle.style.transform = 'scale(1.1)';
-  };
-  el.onmouseleave = () => {
-    circle.style.transform = 'scale(1)';
-  };
+  el.addEventListener('click', () => {
+    console.log('Vehicle Information:', {
+      plate,
+      status: data.status,
+      speed: data.speed,
+      angle: data.angle,
+      position: {
+        lat: data.lat,
+        lng: data.lng
+      },
+      timestamp: data.timestamp
+    });
+  });
 
   el.appendChild(circle);
   el.appendChild(iconContainer);
@@ -93,46 +83,86 @@ export default function Map() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<Record<string, mapboxgl.Marker>>({});
-  const startMarkers = useRef<Record<string, mapboxgl.Marker>>({});
-  const isFirstDataPoint = useRef<boolean>(true);
-  const startPositions = useRef<StartPositions>({});
   const isMapMoving = useRef<boolean>(false);
-  const updateQueue = useRef<QueuedUpdate[]>([]);
-  const moveEndTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [selectedVehicles, setSelectedVehicles] = useState<Set<string>>(new Set());
+  const [vehicleInfos, setVehicleInfos] = useState<Record<string, VehicleDataPoint>>({});
 
-  const processQueuedUpdates = () => {
-    while (updateQueue.current.length > 0) {
-      const update = updateQueue.current.pop();
-      if (!update || !map.current) continue;
+  const handleVehicleToggle = (plate: string, checked: boolean) => {
+    if (checked) {
+      // Subscribe to vehicle
+      webSocketService.subscribeToVehicle(plate, (vehicleData: VehicleData) => {
+        if (!map.current) return;
 
-      const { plate, lng, lat, status, angle } = update;
-      const marker = markers.current[plate];
-      if (!marker) continue;
+        const { data } = vehicleData;
+        setVehicleInfos(prev => ({
+          ...prev,
+          [plate]: data
+        }));
 
-      marker.setLngLat([lng, lat]);
-      const markerEl = marker.getElement();
-      const circle = markerEl.firstChild as HTMLElement;
-      const iconContainer = markerEl.lastChild as HTMLElement;
+        if (!isMapMoving.current) {
+          if (!markers.current[plate]) {
+            const el = createMarkerElement(data.status, data.angle, data, plate);
+            const marker = new mapboxgl.Marker({
+              element: el,
+              anchor: 'center'
+            })
+              .setLngLat([data.lng, data.lat])
+              .addTo(map.current);
 
-      if (markerEl.dataset.status !== status || markerEl.dataset.angle !== angle.toString()) {
-        if (status === 'moving') {
-          iconContainer.style.transform = `rotate(${angle}deg)`;
-          circle.style.backgroundColor = 'rgba(65, 105, 225, 0.9)';
-        } else {
-          iconContainer.style.transform = 'none';
-          circle.style.backgroundColor = 'rgba(128, 128, 128, 0.9)';
+            markers.current[plate] = marker;
+          } else {
+            const marker = markers.current[plate];
+            marker.setLngLat([data.lng, data.lat]);
+            const markerEl = marker.getElement();
+            const circle = markerEl.firstChild as HTMLElement;
+            const iconContainer = markerEl.lastChild as HTMLElement;
+
+            if (data.status === 'moving') {
+              iconContainer.style.backgroundImage = 'url(/arrow-icon.svg)';
+              iconContainer.style.transform = `rotate(${data.angle}deg)`;
+              circle.style.backgroundColor = 'rgba(65, 105, 225, 0.9)';
+            } else {
+              iconContainer.style.backgroundImage = 'url(/default-icon.svg)';
+              iconContainer.style.transform = 'none';
+              circle.style.backgroundColor = 'rgba(128, 128, 128, 0.9)';
+            }
+          }
         }
-        markerEl.dataset.status = status;
-        markerEl.dataset.angle = angle.toString();
+      });
+
+      setSelectedVehicles(prev => new Set([...prev, plate]));
+    } else {
+      // Unsubscribe and cleanup
+      webSocketService.unsubscribeFromVehicle(plate);
+
+      // Make sure to remove the marker
+      if (markers.current[plate]) {
+        markers.current[plate].remove();
+        delete markers.current[plate];
+      }
+
+      // Clean up states
+      setSelectedVehicles(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(plate);
+        return newSet;
+      });
+
+      setVehicleInfos(prev => {
+        const newInfos = { ...prev };
+        delete newInfos[plate];
+        return newInfos;
+      });
+
+      // Force a re-render of the map to ensure marker is removed
+      if (map.current) {
+        map.current.triggerRepaint();
       }
     }
   };
 
   useEffect(() => {
     if (!mapContainer.current) return;
-
-    const currentMarkers: Record<string, mapboxgl.Marker> = {};
-    const currentStartMarkers: Record<string, mapboxgl.Marker> = {};
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -143,111 +173,63 @@ export default function Map() {
       bearing: 0
     });
 
-    map.current.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
+    map.current.addControl(
+      new mapboxgl.NavigationControl({
+        showCompass: true,
+        showZoom: true,
+        visualizePitch: true,
+      }),
+      'bottom-right'
+    );
 
-    // Add event listeners for map movement
+    map.current.addControl(
+      new mapboxgl.ScaleControl({
+        maxWidth: 100,
+        unit: 'metric'
+      }),
+      'bottom-right'
+    );
+
     map.current.on('movestart', () => {
       isMapMoving.current = true;
     });
 
     map.current.on('moveend', () => {
-      // Add a small delay before processing updates to ensure smooth zooming
-      if (moveEndTimeout.current) {
-        clearTimeout(moveEndTimeout.current);
-      }
-      moveEndTimeout.current = setTimeout(() => {
-        isMapMoving.current = false;
-        processQueuedUpdates();
-      }, 150); // Adjust this delay as needed
-    });
-
-    VEHICLE_PLATES.forEach(plate => {
-      webSocketService.subscribeToVehicle(plate, (vehicleData: VehicleData) => {
-        if (!map.current) return;
-
-        const { lng, lat, status, angle } = vehicleData.data;
-
-        // Set start position for this vehicle if not already set
-        if (!startPositions.current[plate]) {
-          startPositions.current[plate] = [lng, lat];
-
-          const startEl = createMarkerElement(status, angle, true);
-          currentStartMarkers[plate] = new mapboxgl.Marker({
-            element: startEl,
-            anchor: 'center'
-          })
-            .setLngLat([lng, lat])
-            .addTo(map.current);
-        }
-
-        if (isFirstDataPoint.current) {
-          map.current.setCenter([lng, lat]);
-          map.current.setZoom(14);
-          isFirstDataPoint.current = false;
-        }
-
-        // Create or update vehicle marker
-        if (!currentMarkers[plate]) {
-          const el = createMarkerElement(status, angle);
-          currentMarkers[plate] = new mapboxgl.Marker({
-            element: el,
-            anchor: 'center'
-          })
-            .setLngLat([lng, lat])
-            .addTo(map.current);
-        } else if (isMapMoving.current) {
-          // Queue the update if the map is moving
-          updateQueue.current.push({ plate, lng, lat, status, angle });
-        } else {
-          // Update immediately if the map is static
-          const marker = currentMarkers[plate];
-          marker.setLngLat([lng, lat]);
-          const markerEl = marker.getElement();
-          const circle = markerEl.firstChild as HTMLElement;
-          const iconContainer = markerEl.lastChild as HTMLElement;
-
-          if (markerEl.dataset.status !== status || markerEl.dataset.angle !== angle.toString()) {
-            if (status === 'moving') {
-              iconContainer.style.transform = `rotate(${angle}deg)`;
-              circle.style.backgroundColor = 'rgba(65, 105, 225, 0.9)';
-            } else {
-              iconContainer.style.transform = 'none';
-              circle.style.backgroundColor = 'rgba(128, 128, 128, 0.9)';
-            }
-            markerEl.dataset.status = status;
-            markerEl.dataset.angle = angle.toString();
-          }
+      isMapMoving.current = false;
+      Object.entries(vehicleInfos).forEach(([plate, info]) => {
+        if (selectedVehicles.has(plate) && markers.current[plate]) {
+          markers.current[plate].setLngLat([info.lng, info.lat]);
         }
       });
     });
 
-    markers.current = currentMarkers;
-    startMarkers.current = currentStartMarkers;
-
     return () => {
-      if (moveEndTimeout.current) {
-        clearTimeout(moveEndTimeout.current);
-      }
-      Object.values(currentMarkers).forEach(marker => marker.remove());
-      Object.values(currentStartMarkers).forEach(marker => marker.remove());
-      VEHICLE_PLATES.forEach(plate => {
-        webSocketService.unsubscribeFromVehicle(plate, () => {});
+      Object.values(markers.current).forEach(marker => marker.remove());
+      selectedVehicles.forEach(plate => {
+        webSocketService.unsubscribeFromVehicle(plate);
       });
       map.current?.remove();
     };
   }, []);
 
   return (
-    <div
-      ref={mapContainer}
-      style={{
-        position: 'absolute',
-        top: 0,
-        bottom: 0,
-        left: 0,
-        right: 0
-      }}
-    />
+    <div className={styles.map}>
+      <div className={styles.vehicleList}>
+        {VEHICLE_PLATES.map(plate => (
+          <label key={plate} className={styles.vehicleItem}>
+            <input
+              type="checkbox"
+              checked={selectedVehicles.has(plate)}
+              onChange={(e) => handleVehicleToggle(plate, e.target.checked)}
+            />
+            <span>{plate}</span>
+          </label>
+        ))}
+      </div>
+      <div
+        ref={mapContainer}
+        className={styles.mapContainer}
+      />
+    </div>
   );
 }
-

@@ -20,7 +20,7 @@ interface SubscriptionPayload {
 
 export class WebSocketService {
   private socket: Socket;
-  private subscribers: Map<string, ((data: VehicleData) => void)[]> = new Map();
+  private subscribers: Map<string, (data: VehicleData) => void> = new Map();
 
   constructor() {
     console.log('Initializing WebSocket service');
@@ -30,11 +30,6 @@ export class WebSocketService {
 
     this.socket.on('connect', () => {
       console.log('Connected to WebSocket server', this.socket.id);
-      // Resubscribe to all vehicles on reconnect
-      this.subscribers.forEach((_, plate) => {
-        const payload: SubscriptionPayload = { plate };
-        this.socket.emit('subscribeToVehicle', payload);
-      });
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -42,42 +37,25 @@ export class WebSocketService {
     });
 
     this.socket.on('vehicleData', (data: VehicleData) => {
-      console.log('Received vehicle data:', data);
-      const callbacks = this.subscribers.get(data.plate);
-      if (callbacks && callbacks.length > 0) {
-        callbacks.forEach(callback => callback(data));
+      const callback = this.subscribers.get(data.plate);
+      if (callback) {
+        callback(data);
       }
     });
   }
 
   subscribeToVehicle(plate: string, callback: (data: VehicleData) => void) {
     console.log(`Subscribing to vehicle ${plate}`);
-
-    if (!this.subscribers.has(plate)) {
-      this.subscribers.set(plate, []);
-      const payload: SubscriptionPayload = { plate };
-      this.socket.emit('subscribeToVehicle', payload);
-    }
-
-    const callbacks = this.subscribers.get(plate)!;
-    callbacks.push(callback);
+    this.subscribers.set(plate, callback);
+    const payload: SubscriptionPayload = { plate };
+    this.socket.emit('subscribeToVehicle', payload);
   }
 
-  unsubscribeFromVehicle(plate: string, callback: (data: VehicleData) => void) {
+  unsubscribeFromVehicle(plate: string) {
     console.log(`Unsubscribing from vehicle ${plate}`);
-    const callbacks = this.subscribers.get(plate);
-    if (!callbacks) return;
-
-    const index = callbacks.indexOf(callback);
-    if (index > -1) {
-      callbacks.splice(index, 1);
-    }
-
-    if (callbacks.length === 0) {
-      this.subscribers.delete(plate);
-      const payload: SubscriptionPayload = { plate };
-      this.socket.emit('unsubscribeFromVehicle', payload);
-    }
+    this.subscribers.delete(plate);
+    const payload: SubscriptionPayload = { plate };
+    this.socket.emit('unsubscribeFromVehicle', payload);
   }
 
   disconnect() {
