@@ -18,7 +18,7 @@ interface SubscriptionPayload {
   plate: string;
 }
 
-export class WebSocketService {
+export class VehicleService {
   private socket: Socket;
   private subscribers: Map<string, (data: VehicleData) => void> = new Map();
 
@@ -63,5 +63,5 @@ export class WebSocketService {
   }
 }
 
-export const webSocketService = new WebSocketService();
+export const vehicleService = new VehicleService();
 export type { VehicleData, VehicleDataPoint };

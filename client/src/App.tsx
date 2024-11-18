@@ -1,11 +1,12 @@
 import { Provider } from "react-redux";
-import Map from "./components/Mapbox";
-import store from "./store";
+import './App.scss';
+import VehicleMap from "./components/VehicleMap";
+import { store } from "./store/store";
 
 function App() {
   return (
     <Provider store={store}>
-      <Map />
+      <VehicleMap />
     </Provider>
   );
 }

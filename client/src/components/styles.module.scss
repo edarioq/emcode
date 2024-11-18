@@ -1,0 +1,94 @@
+.map {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+.list {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 10;
+  background-color: #202020;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  color: white;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  input[type="checkbox"] {
+    cursor: pointer;
+  }
+
+  span {
+    font-size: 0.875rem;
+  }
+}
+
+.container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+.status {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: #202020;
+  backdrop-filter: blur(8px);
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  min-width: 200px;
+  z-index: 10;
+  font-size: 0.8rem;
+  max-width: 300px;
+}
+.close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+.statusGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+.label {
+  color: rgba(255, 255, 255, 0.7);
+}
